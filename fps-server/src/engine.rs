@@ -1,8 +1,13 @@
 //! The engine for several different game sessions running at the same time
 
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashMap, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
 
-use futures::{lock::Mutex, stream::FuturesUnordered, StreamExt};
+use futures::lock::Mutex;
+use tokio::sync::mpsc::{Sender, Receiver};
+
+/// An engine ready for receiving jobs
+struct Unready;
+struct Accepting;
 
 /// The future responsible for a game's session. Return type is the game's ID as it comes out
 type GameFuture<ID> = Pin<Box<dyn Future<Output = ID> + Send>>;
@@ -10,28 +15,16 @@ type GameFuture<ID> = Pin<Box<dyn Future<Output = ID> + Send>>;
 /// The engine holds all currently executing games. It is not aware of any internal state of these
 /// games aside from registered name
 #[derive(Default)]
-pub struct SessionEngine {
-    /// All running games
-    games: Arc<Mutex<FuturesUnordered<GameFuture<usize>>>>,
+pub struct SessionEngine<STATE> {
     /// Id - name mappings for games
-    game_refs: HashMap<usize, String>
+    game_refs: Arc<Mutex<HashMap<usize, String>>>,
+    receiver: Option<Receiver<GameFuture<usize>>>,
+    _phantom: PhantomData<STATE>
 }
 
-impl SessionEngine {
-    /// Registers a new game session with the engine. This locks the current execution for a second
-    /// until it's been added in
-    pub async fn register<S: Into<String>>(&mut self, game: GameFuture<usize>, name: S, id: usize) {
-        let name = name.into();
-        self.games.lock().await.push(game);
-        self.game_refs.insert(id, name);
-    }
-
+impl<STATE> SessionEngine<STATE> {
     /// Runs the server until all games are done executing
     pub async fn run(&mut self) {
-        while let Some(complete) = self.games.lock().await.next().await {
-            tracing::info!("Completed Game with ID {complete}");
-            self.game_refs.remove(&complete);
-        }
     }
 
     /// Wraps self in a thread safe Arc<Mutex<_>>
