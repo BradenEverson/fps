@@ -1,35 +1,37 @@
 //! The engine for several different game sessions running at the same time
 
-use std::{collections::HashMap, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use futures::lock::Mutex;
 use tokio::sync::mpsc::{Sender, Receiver};
-
-/// An engine ready for receiving jobs
-struct Unready;
-struct Accepting;
 
 /// The future responsible for a game's session. Return type is the game's ID as it comes out
 type GameFuture<ID> = Pin<Box<dyn Future<Output = ID> + Send>>;
 
 /// The engine holds all currently executing games. It is not aware of any internal state of these
 /// games aside from registered name
-#[derive(Default)]
-pub struct SessionEngine<STATE> {
+pub struct SessionEngine {
     /// Id - name mappings for games
     game_refs: Arc<Mutex<HashMap<usize, String>>>,
-    receiver: Option<Receiver<GameFuture<usize>>>,
-    _phantom: PhantomData<STATE>
+    receiver: Receiver<GameFuture<usize>>,
 }
 
-impl<STATE> SessionEngine<STATE> {
-    /// Runs the server until all games are done executing
-    pub async fn run(&mut self) {
+impl SessionEngine {
+    /// Creates a new SessionEngine, returns itself and a sender for new game sessions
+    pub fn new() -> (Self, Sender<GameFuture<usize>>) {
+        let (write, read) = tokio::sync::mpsc::channel(100);
+        (SessionEngine { game_refs: Arc::new(Mutex::new(HashMap::new())), receiver: read}, write)
     }
 
-    /// Wraps self in a thread safe Arc<Mutex<_>>
-    pub fn arc(self) -> Arc<Mutex<Self>> {
-        Arc::new(Mutex::new(self))
+    /// Runs until the Game Session channel closes
+    pub async fn run (&mut self) {
+        while let Some(game) = self.receiver.recv().await {
+            //let ref_clone = self.game_refs.clone();
+            tokio::spawn(async move {
+                let _ = game.await;
+                //ref_clone.lock().await.remove(&id);
+            });
+        }
     }
 }
 
@@ -58,23 +60,22 @@ mod tests {
         let fut2 = generate_future::<200>();
         let fut3 = generate_future::<100>();
 
-        let engine = SessionEngine::default().arc();
+        let (mut engine, sender) = SessionEngine::new();
 
-        engine.lock().await.register(fut1, "future1", 0).await;
-
-        let engine_clone = engine.clone();
         let start = tokio::spawn(async move {
-            engine_clone.lock().await.run().await;
+            engine.run().await;
         });
+
+        sender.send(fut1).await.expect("Failed to send");
 
         let add = tokio::spawn(async move {
             tracing::warn!("Attempting to add new future 1");
-            engine.lock().await.register(fut2, "future2", 1).await;
+            sender.send(fut2).await.expect("Failed to send");
             tracing::warn!("Attempting to add new future 2");
-            engine.lock().await.register(fut3, "future3", 2).await;
+            sender.send(fut3).await.expect("Failed to send");
         });
 
 
-        tokio::join!(start, add).1.expect("Failed");
+        tokio::join!(start, add).0.expect("Failed");
     }
 }
