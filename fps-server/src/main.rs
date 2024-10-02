@@ -7,7 +7,8 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    let (mut engine, sender) = SessionEngine::<usize>::new();
+    let (mut engine, _game_sender) = SessionEngine::<usize>::new();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
     let listener = TcpListener::bind("0.0.0.0:7878")
         .await
         .expect("Failed to start up server");
@@ -28,6 +29,12 @@ async fn main() {
                     tracing::error!("Error serving connection :( {}", e)
                 }
             });
+        }
+    });
+
+    tokio::spawn(async move {
+        while let Some(_stream) = receiver.recv().await {
+            // New client stream, add it to in lobby clients
         }
     });
 

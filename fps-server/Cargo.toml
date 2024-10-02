@@ -8,6 +8,7 @@ authors.workspace = true
 futures = "0.3.30"
 http-body-util = "0.1.2"
 hyper = { version = "1.4.1", features = ["http1", "server"] }
+hyper-tungstenite = "0.15.0"
 hyper-util = { version = "0.1.9", features = ["tokio"] }
 tokio = { version = "1.40.0", features = ["full"] }
 tokio-tungstenite = "0.24.0"
