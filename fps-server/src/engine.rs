@@ -1,6 +1,6 @@
 //! The engine for several different game sessions running at the same time
 
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashMap, future::Future, hash::Hash, pin::Pin, sync::Arc};
 
 use futures::lock::Mutex;
 use tokio::sync::mpsc::{Sender, Receiver};
@@ -8,17 +8,42 @@ use tokio::sync::mpsc::{Sender, Receiver};
 /// The future responsible for a game's session. Return type is the game's ID as it comes out
 type GameFuture<ID> = Pin<Box<dyn Future<Output = ID> + Send>>;
 
-/// The engine holds all currently executing games. It is not aware of any internal state of these
-/// games aside from registered name
-pub struct SessionEngine {
-    /// Id - name mappings for games
-    game_refs: Arc<Mutex<HashMap<usize, String>>>,
-    receiver: Receiver<GameFuture<usize>>,
+/// All relevant game metadata
+pub struct GameInfo<ID> {
+    /// The Game's ID
+    pub id: ID,
+    /// The Game's name
+    pub name: String,
+    /// The Game's game
+    fut: GameFuture<ID>,
 }
 
-impl SessionEngine {
+impl<ID> GameInfo<ID> {
+    /// Creates a new GameInfo based on an ID, name, and arbitrary runtime future
+    pub fn new<S: Into<String>>(id: ID, name: S, fut: GameFuture<ID>) -> Self {
+        Self { id, name: name.into(), fut }
+    }
+
+    /// Executes the game's internal future
+    pub async fn exec(self) -> ID {
+        self.fut.await
+    }
+}
+
+/// The engine holds all currently executing games. It is not aware of any internal state of these
+/// games aside from registered name
+pub struct SessionEngine<ID> {
+    /// Id - name mappings for games
+    game_refs: Arc<Mutex<HashMap<ID, String>>>,
+    receiver: Receiver<GameInfo<ID>>,
+}
+
+impl<ID> SessionEngine<ID>
+where 
+    ID: Send + Sync + Hash + Copy + Eq + 'static
+{
     /// Creates a new SessionEngine, returns itself and a sender for new game sessions
-    pub fn new() -> (Self, Sender<GameFuture<usize>>) {
+    pub fn new() -> (Self, Sender<GameInfo<ID>>) {
         let (write, read) = tokio::sync::mpsc::channel(100);
         (SessionEngine { game_refs: Arc::new(Mutex::new(HashMap::new())), receiver: read}, write)
     }
@@ -26,10 +51,18 @@ impl SessionEngine {
     /// Runs until the Game Session channel closes
     pub async fn run (&mut self) {
         while let Some(game) = self.receiver.recv().await {
-            //let ref_clone = self.game_refs.clone();
+            let ref_clone = self.game_refs.clone();
             tokio::spawn(async move {
-                let _ = game.await;
-                //ref_clone.lock().await.remove(&id);
+                let id = game.id;
+                {
+                    ref_clone.lock().await.insert(id, game.name.clone());
+                }
+
+                game.exec().await;
+
+                {
+                    ref_clone.lock().await.remove(&id);
+                }
             });
         }
     }
@@ -41,7 +74,7 @@ mod tests {
 
     use futures::FutureExt;
 
-    use crate::engine::{GameFuture, SessionEngine};
+    use crate::engine::{GameFuture, SessionEngine, GameInfo};
 
     #[tokio::test]
     async fn session_engine_can_be_added_to_while_running() {
@@ -60,19 +93,23 @@ mod tests {
         let fut2 = generate_future::<200>();
         let fut3 = generate_future::<100>();
 
+        let game1 = GameInfo::new(0, "Server 1", fut1);
+        let game2 = GameInfo::new(1, "Server 3", fut2);
+        let game3 = GameInfo::new(2, "Server 3", fut3);
+
         let (mut engine, sender) = SessionEngine::new();
 
         let start = tokio::spawn(async move {
             engine.run().await;
         });
 
-        sender.send(fut1).await.expect("Failed to send");
+        sender.send(game1).await.expect("Failed to send");
 
         let add = tokio::spawn(async move {
             tracing::warn!("Attempting to add new future 1");
-            sender.send(fut2).await.expect("Failed to send");
+            sender.send(game2).await.expect("Failed to send");
             tracing::warn!("Attempting to add new future 2");
-            sender.send(fut3).await.expect("Failed to send");
+            sender.send(game3).await.expect("Failed to send");
         });
 
 
