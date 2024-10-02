@@ -3,7 +3,7 @@
 use std::{collections::HashMap, fmt::Display, future::Future, hash::Hash, pin::Pin, sync::Arc};
 
 use futures::lock::Mutex;
-use tokio::sync::mpsc::{Sender, Receiver};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 /// The future responsible for a game's session. Return type is the game's ID as it comes out
 type GameFuture<ID> = Pin<Box<dyn Future<Output = ID> + Send>>;
@@ -21,7 +21,11 @@ pub struct GameInfo<ID> {
 impl<ID> GameInfo<ID> {
     /// Creates a new GameInfo based on an ID, name, and arbitrary runtime future
     pub fn new<S: Into<String>>(id: ID, name: S, fut: GameFuture<ID>) -> Self {
-        Self { id, name: name.into(), fut }
+        Self {
+            id,
+            name: name.into(),
+            fut,
+        }
     }
 
     /// Executes the game's internal future
@@ -39,17 +43,23 @@ pub struct SessionEngine<ID> {
 }
 
 impl<ID> SessionEngine<ID>
-where 
-    ID: Display + Send + Sync + Hash + Copy + Eq + 'static
+where
+    ID: Display + Send + Sync + Hash + Copy + Eq + 'static,
 {
     /// Creates a new SessionEngine, returns itself and a sender for new game sessions
     pub fn new() -> (Self, Sender<GameInfo<ID>>) {
         let (write, read) = tokio::sync::mpsc::channel(100);
-        (SessionEngine { game_refs: Arc::new(Mutex::new(HashMap::new())), receiver: read}, write)
+        (
+            SessionEngine {
+                game_refs: Arc::new(Mutex::new(HashMap::new())),
+                receiver: read,
+            },
+            write,
+        )
     }
 
     /// Runs until the Game Session channel closes
-    pub async fn run (&mut self) {
+    pub async fn run(&mut self) {
         while let Some(game) = self.receiver.recv().await {
             let ref_clone = self.game_refs.clone();
             tokio::spawn(async move {
@@ -76,7 +86,7 @@ mod tests {
 
     use futures::FutureExt;
 
-    use crate::engine::{GameFuture, SessionEngine, GameInfo};
+    use crate::engine::{GameFuture, GameInfo, SessionEngine};
 
     #[tokio::test]
     async fn session_engine_can_be_added_to_while_running() {
@@ -88,7 +98,8 @@ mod tests {
                 tracing::info!("Ending future {TIME}");
 
                 TIME
-            }.boxed()
+            }
+            .boxed()
         }
 
         let fut1 = generate_future::<500>();
@@ -115,6 +126,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(500)).await;
         });
 
-        tokio::join!(start, add).0.expect("Failed");
+        let result = tokio::join!(start, add);
+        assert!(matches!(result, (Ok(_), Ok(_))))
     }
 }
