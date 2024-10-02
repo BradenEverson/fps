@@ -39,6 +39,7 @@ impl<ID> GameInfo<ID> {
 pub struct SessionEngine<ID> {
     /// Id - name mappings for games
     game_refs: Arc<Mutex<HashMap<ID, String>>>,
+    /// The receiving end of a game sending channel
     receiver: Receiver<GameInfo<ID>>,
 }
 
