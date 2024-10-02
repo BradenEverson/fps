@@ -1,6 +1,6 @@
 //! The engine for several different game sessions running at the same time
 
-use std::{collections::HashMap, future::Future, hash::Hash, pin::Pin, sync::Arc};
+use std::{collections::HashMap, fmt::Display, future::Future, hash::Hash, pin::Pin, sync::Arc};
 
 use futures::lock::Mutex;
 use tokio::sync::mpsc::{Sender, Receiver};
@@ -40,7 +40,7 @@ pub struct SessionEngine<ID> {
 
 impl<ID> SessionEngine<ID>
 where 
-    ID: Send + Sync + Hash + Copy + Eq + 'static
+    ID: Display + Send + Sync + Hash + Copy + Eq + 'static
 {
     /// Creates a new SessionEngine, returns itself and a sender for new game sessions
     pub fn new() -> (Self, Sender<GameInfo<ID>>) {
@@ -53,6 +53,7 @@ where
         while let Some(game) = self.receiver.recv().await {
             let ref_clone = self.game_refs.clone();
             tokio::spawn(async move {
+                tracing::info!("Starting game with name `{}` and id {}", game.name, game.id);
                 let id = game.id;
                 {
                     ref_clone.lock().await.insert(id, game.name.clone());
@@ -60,6 +61,7 @@ where
 
                 game.exec().await;
 
+                tracing::info!("Finished game {}", id);
                 {
                     ref_clone.lock().await.remove(&id);
                 }
@@ -106,9 +108,9 @@ mod tests {
         sender.send(game1).await.expect("Failed to send");
 
         let add = tokio::spawn(async move {
-            tracing::warn!("Attempting to add new future 1");
+            tracing::debug!("Attempting to add new future 1");
             sender.send(game2).await.expect("Failed to send");
-            tracing::warn!("Attempting to add new future 2");
+            tracing::debug!("Attempting to add new future 2");
             sender.send(game3).await.expect("Failed to send");
             tokio::time::sleep(Duration::from_millis(500)).await;
         });
