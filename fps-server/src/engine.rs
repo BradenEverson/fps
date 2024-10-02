@@ -3,7 +3,10 @@
 use std::{collections::HashMap, fmt::Display, future::Future, hash::Hash, pin::Pin, sync::Arc};
 
 use futures::lock::Mutex;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{mpsc::{Receiver, Sender}, Semaphore};
+
+/// A limit on how many game sessions can run at a time
+static MAX_LOBBIES: Semaphore = Semaphore::const_new(100);
 
 /// The future responsible for a game's session. Return type is the game's ID as it comes out
 type GameFuture<ID> = Pin<Box<dyn Future<Output = ID> + Send>>;
@@ -64,6 +67,10 @@ where
         while let Some(game) = self.receiver.recv().await {
             let ref_clone = self.game_refs.clone();
             tokio::spawn(async move {
+                tracing::info!("Waiting for available game slot...");
+
+                let _ = MAX_LOBBIES.acquire().await.expect("Semaphore acquire failed");
+
                 tracing::info!("Starting game with name `{}` and id {}", game.name, game.id);
                 let id = game.id;
                 {
