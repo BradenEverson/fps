@@ -82,7 +82,7 @@ mod tests {
         fn generate_future<const TIME: usize>() -> GameFuture<usize> {
             async {
                 tracing::info!("Entering future {TIME}");
-                std::thread::sleep(Duration::from_millis(TIME as u64));
+                tokio::time::sleep(Duration::from_millis(TIME as u64)).await;
                 tracing::info!("Ending future {TIME}");
 
                 TIME
@@ -110,8 +110,8 @@ mod tests {
             sender.send(game2).await.expect("Failed to send");
             tracing::warn!("Attempting to add new future 2");
             sender.send(game3).await.expect("Failed to send");
+            tokio::time::sleep(Duration::from_millis(500)).await;
         });
-
 
         tokio::join!(start, add).0.expect("Failed");
     }
