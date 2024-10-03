@@ -2,10 +2,8 @@
 
 use std::{collections::HashMap, fmt::Display, future::Future, hash::Hash, pin::Pin, sync::Arc};
 
-use futures::lock::Mutex;
 use tokio::sync::{
-    mpsc::{Receiver, Sender},
-    Semaphore,
+    mpsc::{Receiver, Sender}, RwLock, Semaphore
 };
 
 /// A limit on how many game sessions can run at a time
@@ -44,7 +42,7 @@ impl<ID> GameInfo<ID> {
 /// games aside from registered name
 pub struct SessionEngine<ID> {
     /// Id - name mappings for games
-    game_refs: Arc<Mutex<HashMap<ID, String>>>,
+    pub game_refs: Arc<RwLock<HashMap<ID, String>>>,
     /// The receiving end of a game sending channel
     receiver: Receiver<GameInfo<ID>>,
 }
@@ -58,7 +56,7 @@ where
         let (write, read) = tokio::sync::mpsc::channel(100);
         (
             SessionEngine {
-                game_refs: Arc::new(Mutex::new(HashMap::new())),
+                game_refs: Arc::new(RwLock::new(HashMap::new())),
                 receiver: read,
             },
             write,
@@ -80,14 +78,14 @@ where
                 tracing::info!("Starting game with name `{}` and id {}", game.name, game.id);
                 let id = game.id;
                 {
-                    ref_clone.lock().await.insert(id, game.name.clone());
+                    ref_clone.write().await.insert(id, game.name.clone());
                 }
 
                 game.exec().await;
 
                 tracing::info!("Finished game {}", id);
                 {
-                    ref_clone.lock().await.remove(&id);
+                    ref_clone.write().await.remove(&id);
                 }
             });
         }

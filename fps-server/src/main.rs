@@ -13,12 +13,13 @@ async fn main() {
         .await
         .expect("Failed to start up server");
 
+    let engine_game_ref = engine.game_refs.clone();
     tokio::spawn(async move {
         loop {
             let (socket, _) = listener.accept().await.expect("Error accepting connection");
 
             let io = TokioIo::new(socket);
-            let manager = GameManager(sender.clone(), game_sender.clone());
+            let manager = GameManager::new(sender.clone(), game_sender.clone(), engine_game_ref.clone()) ;
 
             tokio::spawn(async move {
                 if let Err(e) = http1::Builder::new()
