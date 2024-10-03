@@ -12,8 +12,10 @@ use hyper_util::rt::TokioIo;
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::WebSocketStream;
 
+use crate::engine::GameInfo;
+
 /// Everything necessary to add a new game session to the engine
-pub struct GameManager(pub Sender<ClientStream>);
+pub struct GameManager(pub Sender<ClientStream>, pub Sender<GameInfo<usize>>);
 
 /// A Client WebSocket read and write stream
 pub type ClientStream = WebSocketStream<TokioIo<Upgraded>>;
@@ -26,14 +28,18 @@ impl Service<Request<body::Incoming>> for GameManager {
     fn call(&self, mut req: Request<body::Incoming>) -> Self::Future {
         let sender = self.0.clone();
         if hyper_tungstenite::is_upgrade_request(&req) {
-            let (response, websocket) = hyper_tungstenite::upgrade(&mut req, None).expect("Error upgrading to websocket");
+            let (response, websocket) =
+                hyper_tungstenite::upgrade(&mut req, None).expect("Error upgrading to websocket");
 
             tokio::spawn(async move {
                 match websocket.await {
                     Ok(ws) => {
-                        sender.send(ws).await.expect("Failed to transfer client websocket connection");
+                        sender
+                            .send(ws)
+                            .await
+                            .expect("Failed to transfer client websocket connection");
                     }
-                    Err(e) => tracing::error!("Failed to construct websocket, {}", e)
+                    Err(e) => tracing::error!("Failed to construct websocket, {}", e),
                 }
             });
 

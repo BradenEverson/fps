@@ -7,7 +7,7 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    let (mut engine, _game_sender) = SessionEngine::<usize>::new();
+    let (mut engine, game_sender) = SessionEngine::<usize>::new();
     let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
     let listener = TcpListener::bind("0.0.0.0:7878")
         .await
@@ -18,7 +18,7 @@ async fn main() {
             let (socket, _) = listener.accept().await.expect("Error accepting connection");
 
             let io = TokioIo::new(socket);
-            let manager = GameManager(sender.clone());
+            let manager = GameManager(sender.clone(), game_sender.clone());
 
             tokio::spawn(async move {
                 if let Err(e) = http1::Builder::new()
@@ -33,7 +33,7 @@ async fn main() {
     });
 
     tokio::spawn(async move {
-        while let Some(_stream) = receiver.recv().await {
+        while let Some(stream) = receiver.recv().await {
             // New client stream, add it to in lobby clients
         }
     });
